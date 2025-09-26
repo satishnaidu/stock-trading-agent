@@ -72,21 +72,15 @@ def main():
 
         # Create and train agent
         print("Creating and training agent...")
-        state_dim = 7
-        action_dim = 3
+        state_dim = env.observation_space.shape[0]  # Get state dimension from environment
+        action_dim = env.action_space.n  # Get action dimension from environment
         agent = PPOAgent(state_dim, action_dim)
 
         # Train the agent
         print("Training agent...")
         agent.train(env, num_episodes=1000)
 
-        # Backtest
-        print("\nStarting backtest...")
-        state, _ = env.reset()
-        done = False
-        total_reward = 0
-        rewards = []
-        agent.backtest(env)
+        agent.save("ppo_trading_model")
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")

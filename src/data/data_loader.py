@@ -8,7 +8,7 @@ import time
 class DataLoader:
 
     @staticmethod
-    def prepare_data(df):
+    def prepare_data2(df):
         """
         Prepare data for the trading environment
         """
@@ -183,7 +183,7 @@ class DataLoader:
         return df
 
     @staticmethod
-    def prepare_data2(df):
+    def prepare_data1(df):
         """Prepare data for the trading environment"""
         data = []
         try:
@@ -206,3 +206,34 @@ class DataLoader:
         except Exception as e:
             print(f"Error preparing data: {str(e)}")
             raise
+
+    @staticmethod
+    def prepare_data(df):
+        # Print the columns to debug
+        print("Available columns:", df.columns.tolist())
+
+        # Ensure we have the required columns or rename them appropriately
+        # Assuming your data might have different column names, e.g., 'Close' instead of 'close'
+        column_mapping = {
+            'Close': 'close',
+            'Open': 'open',
+            'High': 'high',
+            'Low': 'low',
+            'Volume': 'volume'
+        }
+
+        # Rename columns if they exist
+        df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
+
+        # Forward fill missing values
+        df = df.ffill()
+
+        # Calculate additional features (if needed)
+        df['returns'] = df['close'].pct_change()
+        df['ma7'] = df['close'].rolling(window=7).mean()
+        df['ma21'] = df['close'].rolling(window=21).mean()
+
+        # Drop any remaining NaN values
+        df = df.dropna()
+
+        return df

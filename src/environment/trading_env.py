@@ -1,101 +1,93 @@
 # src/environment/trading_env.py
-
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
 import pandas as pd
-# src/environment/trading_env.py
 
-class TradingEnvironment:
-    def __init__(self, data):
-        if isinstance(data, list):
-            self.data = pd.DataFrame(data)
-        else:
-            self.data = data
+class TradingEnvironment(gym.Env):
+    def __init__(self, df, initial_balance=10000):
+        super(TradingEnvironment, self).__init__()
 
-        self.initial_balance = 10000.0
+        self.df = df
+        print("DataFrame columns:", self.df.columns.tolist())  # Debug print
+
+        # Verify required columns exist
+        required_columns = ['close']
+        missing_columns = [col for col in required_columns if col not in self.df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}. Available columns: {self.df.columns.tolist()}")
+
+        self.initial_balance = initial_balance
+
+        # Define action space (0: Hold, 1: Buy, 2: Sell)
+        self.action_space = spaces.Discrete(3)
+
+        # Define observation space
+        num_features = len(self.df.columns) + 2  # +2 for balance and holdings
+        self.observation_space = spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(num_features,),
+            dtype=np.float32
+        )
+
         self.reset()
 
-    def reset(self):
-        """
-        Reset the environment to initial state
-        Returns:
-            tuple: (observation, info)
-        """
+    def reset(self, seed=None):
+        super().reset(seed=seed)
         self.current_step = 0
         self.balance = self.initial_balance
-        self.position = 0
-        self.shares = 0
-        self.total_value = self.balance
+        self.shares_held = 0
 
-        # Return both state and info dict to match gym interface
-        observation = self._get_state()
-        info = {
-            'balance': self.balance,
-            'total_value': self.total_value,
-            'step': self.current_step
-        }
-        return observation, info
+        # Safely get the current price
+        try:
+            self.current_price = float(self.df.iloc[self.current_step]['close'])
+        except KeyError as e:
+            print(f"Available columns: {self.df.columns.tolist()}")
+            raise KeyError(f"Column 'close' not found in DataFrame. Available columns: {self.df.columns.tolist()}")
 
-    def _get_state(self):
-        current_data = self.data.iloc[self.current_step]
+        return self._get_observation(), {}
 
-        # Calculate price normalization factor
-        price_scale = self.data['Close'].max()
-        volume_scale = self.data['Volume'].max()
+    def _get_observation(self):
+        # Get the current state of the environment
+        features = self.df.iloc[self.current_step].values
 
-        state = np.array([
-            current_data['Open'] / price_scale,
-            current_data['High'] / price_scale,
-            current_data['Low'] / price_scale,
-            current_data['Close'] / price_scale,
-            current_data['Volume'] / volume_scale,
-            self.position,
-            self.balance / self.initial_balance
-        ], dtype=np.float32)
+        # Add balance and shares held to the observation
+        obs = np.append(features, [
+            self.balance,
+            self.shares_held
+        ])
 
-        return state
+        return obs.astype(np.float32)
 
     def step(self, action):
-        """
-        Execute one step in the environment
-        Returns:
-            tuple: (observation, reward, terminated, truncated, info)
-        """
-        # Store current price for reward calculation
-        current_price = self.data.iloc[self.current_step]['Close']
-
-        # Execute action
-        if action == 1:  # Buy
-            if self.position == 0:
-                shares_to_buy = self.balance // current_price
-                self.shares = shares_to_buy
-                self.balance -= shares_to_buy * current_price
-                self.position = 1
-        elif action == 2:  # Sell
-            if self.position == 1:
-                self.balance += self.shares * current_price
-                self.shares = 0
-                self.position = 0
-
-        # Move to next step
         self.current_step += 1
 
-        # Calculate reward
-        new_total_value = self.balance + (self.shares * current_price)
-        reward = ((new_total_value - self.total_value) / self.total_value) * 100
-        self.total_value = new_total_value
+        if self.current_step >= len(self.df):
+            return self._get_observation(), 0, True, False, {}
 
-        # Check if done
-        done = self.current_step >= len(self.data) - 1
+        self.current_price = float(self.df.iloc[self.current_step]['close'])
 
-        # Get next state
-        next_state = self._get_state()
+        # Execute trading action
+        reward = self._take_action(action)
 
-        info = {
-            'balance': self.balance,
-            'total_value': self.total_value,
-            'shares': self.shares,
-            'current_price': current_price
-        }
+        # Calculate if done
+        done = self.current_step >= len(self.df) - 1
 
-        return next_state, reward, done, False, info
+        return self._get_observation(), reward, done, False, {}
 
+    def _take_action(self, action):
+        reward = 0
+
+        if action == 1:  # Buy
+            if self.balance >= self.current_price:
+                self.shares_held += 1
+                self.balance -= self.current_price
+                reward = 1
+        elif action == 2:  # Sell
+            if self.shares_held > 0:
+                self.shares_held -= 1
+                self.balance += self.current_price
+                reward = 1
+
+        return reward
