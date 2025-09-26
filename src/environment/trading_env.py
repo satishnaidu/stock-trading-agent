@@ -1,88 +1,101 @@
-import gymnasium as gym
+# src/environment/trading_env.py
+
 import numpy as np
-from gymnasium import spaces
+import pandas as pd
+# src/environment/trading_env.py
 
-class TradingEnvironment(gym.Env):
-    def __init__(self, data, initial_balance=100000, max_position=100):
-        super().__init__()
+class TradingEnvironment:
+    def __init__(self, data):
+        if isinstance(data, list):
+            self.data = pd.DataFrame(data)
+        else:
+            self.data = data
 
-        self.data = data
-        self.initial_balance = initial_balance
-        self.max_position = max_position
-
-        # Define action and observation spaces
-        self.action_space = spaces.Discrete(3)  # Buy, Sell, Hold
-
-        # Define observation space with specific low and high values
-        self.observation_space = spaces.Box(
-            low=np.array([-np.inf, -np.inf, -self.max_position, 0, -np.inf, -np.inf], dtype=np.float32),
-            high=np.array([np.inf, np.inf, self.max_position, np.inf, np.inf, np.inf], dtype=np.float32),
-            dtype=np.float32
-        )
-
+        self.initial_balance = 10000.0
         self.reset()
 
-    def reset(self, seed=None):
-        super().reset(seed=seed)
+    def reset(self):
+        """
+        Reset the environment to initial state
+        Returns:
+            tuple: (observation, info)
+        """
         self.current_step = 0
         self.balance = self.initial_balance
         self.position = 0
-        self.total_pnl = 0
+        self.shares = 0
+        self.total_value = self.balance
 
-        return self._get_observation(), {}
+        # Return both state and info dict to match gym interface
+        observation = self._get_state()
+        info = {
+            'balance': self.balance,
+            'total_value': self.total_value,
+            'step': self.current_step
+        }
+        return observation, info
 
-    def _get_observation(self):
-        current_data = self.data[self.current_step]
-        return np.array([
-            float(current_data['price']),
-            float(current_data['volume']),
-            float(self.position),
-            float(self.balance),
-            float(self.total_pnl),
-            float(current_data['market_feature'])
+    def _get_state(self):
+        current_data = self.data.iloc[self.current_step]
+
+        # Calculate price normalization factor
+        price_scale = self.data['Close'].max()
+        volume_scale = self.data['Volume'].max()
+
+        state = np.array([
+            current_data['Open'] / price_scale,
+            current_data['High'] / price_scale,
+            current_data['Low'] / price_scale,
+            current_data['Close'] / price_scale,
+            current_data['Volume'] / volume_scale,
+            self.position,
+            self.balance / self.initial_balance
         ], dtype=np.float32)
 
-    def step(self, action):
-        # Execute trading action
-        reward = self._execute_trade(action)
+        return state
 
-        # Move to next time step
+    def step(self, action):
+        """
+        Execute one step in the environment
+        Returns:
+            tuple: (observation, reward, terminated, truncated, info)
+        """
+        # Store current price for reward calculation
+        current_price = self.data.iloc[self.current_step]['Close']
+
+        # Execute action
+        if action == 1:  # Buy
+            if self.position == 0:
+                shares_to_buy = self.balance // current_price
+                self.shares = shares_to_buy
+                self.balance -= shares_to_buy * current_price
+                self.position = 1
+        elif action == 2:  # Sell
+            if self.position == 1:
+                self.balance += self.shares * current_price
+                self.shares = 0
+                self.position = 0
+
+        # Move to next step
         self.current_step += 1
+
+        # Calculate reward
+        new_total_value = self.balance + (self.shares * current_price)
+        reward = ((new_total_value - self.total_value) / self.total_value) * 100
+        self.total_value = new_total_value
+
+        # Check if done
         done = self.current_step >= len(self.data) - 1
 
-        # Calculate metrics
+        # Get next state
+        next_state = self._get_state()
+
         info = {
-            'total_pnl': float(self.total_pnl),
-            'position': float(self.position),
-            'balance': float(self.balance)
+            'balance': self.balance,
+            'total_value': self.total_value,
+            'shares': self.shares,
+            'current_price': current_price
         }
 
-        return self._get_observation(), float(reward), done, False, info
+        return next_state, reward, done, False, info
 
-    def _execute_trade(self, action):
-        current_price = float(self.data[self.current_step]['price'])
-        previous_value = self.balance + self.position * current_price
-
-        if action == 0:  # Buy
-            if self.position < self.max_position:
-                shares_to_buy = min(
-                    self.max_position - self.position,
-                    self.balance // current_price
-                )
-                self.position += shares_to_buy
-                self.balance -= shares_to_buy * current_price
-
-        elif action == 1:  # Sell
-            if self.position > -self.max_position:
-                shares_to_sell = min(
-                    self.max_position + self.position,
-                    self.position
-                )
-                self.position -= shares_to_sell
-                self.balance += shares_to_sell * current_price
-
-        current_value = self.balance + self.position * current_price
-        reward = current_value - previous_value
-        self.total_pnl = current_value - self.initial_balance
-
-        return float(reward)

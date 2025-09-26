@@ -1,5 +1,5 @@
 from src.environment.trading_env import TradingEnvironment
-from src.agents.ppo_agent import TradingAgent
+from src.agents.ppo_agent import PPOAgent
 from src.data.data_loader import DataLoader
 import numpy as np
 import pandas as pd
@@ -72,11 +72,13 @@ def main():
 
         # Create and train agent
         print("Creating and training agent...")
-        agent = TradingAgent(env)
+        state_dim = 7
+        action_dim = 3
+        agent = PPOAgent(state_dim, action_dim)
 
         # Train the agent
         print("Training agent...")
-        agent.train(total_timesteps=10000)
+        agent.train(env, num_episodes=1000)
 
         # Backtest
         print("\nStarting backtest...")
@@ -84,22 +86,7 @@ def main():
         done = False
         total_reward = 0
         rewards = []
-
-        while not done:
-            action = agent.predict(state)
-            state, reward, done, _, info = env.step(action)
-            total_reward += reward
-            rewards.append(reward)
-
-            if len(rewards) % 100 == 0:
-                print(f"Step: {len(rewards)}")
-                print(f"Average Reward: {np.mean(rewards[-100:]):.2f}")
-                print(f"Total P&L: ${info['total_pnl']:.2f}")
-                print("-------------------")
-
-        print(f"\nBacktest completed!")
-        print(f"Final P&L: ${info['total_pnl']:.2f}")
-        print(f"Total Reward: {total_reward:.2f}")
+        agent.backtest(env)
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")

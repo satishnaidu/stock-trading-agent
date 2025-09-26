@@ -6,6 +6,32 @@ import requests
 import time
 
 class DataLoader:
+
+    @staticmethod
+    def prepare_data(df):
+        """
+        Prepare data for the trading environment
+        """
+        # Calculate technical indicators
+        df['MA5'] = df['Close'].rolling(window=5).mean()
+        df['MA10'] = df['Close'].rolling(window=10).mean()
+
+        # Calculate RSI
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df['RSI'] = 100 - (100 / (1 + rs))
+
+        # Forward fill NaN values
+        df = df.fillna(method='ffill')
+
+        # Drop any remaining NaN values
+        df = df.dropna()
+
+        return df
+
+
     @staticmethod
     def load_stock_data(symbol, start_date, end_date, retries=3):
         """Load stock data with multiple fallback options"""
@@ -157,7 +183,7 @@ class DataLoader:
         return df
 
     @staticmethod
-    def prepare_data(df):
+    def prepare_data2(df):
         """Prepare data for the trading environment"""
         data = []
         try:
